@@ -1,4 +1,14 @@
-package imgui_ext
+package imgui
+
+import "core:c"
+import "core:math"
+import "core:time"
+import "core:slice"
+import "core:reflect"
+import "core:runtime"
+import "core:mem"
+import "core:fmt"
+import "core:strings"
 
 InputTextDynamicCallbackUserData :: struct {
     buf                   : ^[dynamic] u8,
@@ -66,11 +76,3 @@ HelpMarker :: proc(desc: string) {
 	}
 }
 
-import "core:math"
-import "core:time"
-import "core:slice"
-import "core:reflect"
-import "core:runtime"
-import "core:mem"
-import "core:fmt"
-import "core:strings"
