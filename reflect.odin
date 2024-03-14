@@ -9,10 +9,46 @@ import "core:runtime"
 import "core:mem"
 import "core:fmt"
 import "core:strings"
+import "core:intrinsics"
 
-ComboEnum :: proc(label: cstring, value: ^$T, combo_flags: ComboFlags = {}, selectable_flags: SelectableFlags = {}) {
-	values 				:= reflect.enum_field_values(T)
-	names  				:= reflect.enum_field_names(T)
+
+/*
+    A combo box that allows the user to select a key from a map.
+    Technically, you should be able to use this with any map type, 
+    however I would only recommend using it for simple things like string, int, or enum.
+    
+    TODO: implement a dynamic version
+*/
+ComboHash :: proc(
+    label            : string, 
+    _map             : ^$T/map[$K]$V, 
+    selected         : ^K, 
+    combo_flags      : ComboFlags      = {}, 
+    selectable_flags : SelectableFlags = {},
+) {
+	label := strings.clone_to_cstring(label, context.temp_allocator)
+    
+    selected_key_string := fmt.tprintf("%v\x00", selected)
+    if BeginCombo(label, selected_key_string, combo_flags) {
+        for k in _map {
+            key_string := fmt.tprintf("%v\x00", k)
+            if SelectableEx(key_string, selected^ == k, selectable_flags, {}) {
+				selected^ = k
+			}
+        }
+		EndCombo()
+    }
+}
+
+ComboEnum :: proc(
+    label: string, 
+    value: ^$T, 
+    combo_flags: ComboFlags           = {}, 
+    selectable_flags: SelectableFlags = {}
+) where intrinsics.type_is_enum(T) {
+	label  := strings.clone_to_cstring(label, context.temp_allocator)
+	values := reflect.enum_field_values(T)
+	names  := reflect.enum_field_names(T)
 	current_value_index := slice.linear_search(values, auto_cast value^) or_else 0 // Could we use binary search? need to find out if values are always ordered...
 	current_value_name  := names[current_value_index]
 	if BeginCombo(label, cstring(raw_data(current_value_name)), combo_flags) {
@@ -27,11 +63,13 @@ ComboEnum :: proc(label: cstring, value: ^$T, combo_flags: ComboFlags = {}, sele
 
 // If the given type is not an enum, the procedure will do nothing and return
 ComboEnumDynamic :: proc(
-	label            : cstring, 
+	label            : string, 
 	value            : any, 
 	combo_flags      : ComboFlags = {}, 
 	selectable_flags : SelectableFlags = {}
   ) {
+  	label := strings.clone_to_cstring(label, context.temp_allocator)
+  
 	ti := type_info_of(value.id)
 	if ti_named, ok := ti.variant.(runtime.Type_Info_Named); ok {
 	  	ti = ti_named.base
@@ -49,6 +87,7 @@ ComboEnumDynamic :: proc(
   
 	current_value_index := slice.linear_search(tiv.values, enum_value) or_else 0 
 	current_value_name  := tiv.names[current_value_index]
+	
 	if BeginCombo(label, cstring(raw_data(current_value_name)), combo_flags) {
 		for i in 0..<len(tiv.values) {
 			if SelectableEx(cstring(raw_data(tiv.names[i])), enum_value == tiv.values[i], selectable_flags, {}) {
@@ -67,11 +106,12 @@ ComboEnumDynamic :: proc(
 }
 
 ComboUnion :: proc(
-	label            : cstring, 
+	label            : string, 
 	value            : ^$T, 
 	combo_flags      : ComboFlags = {}, 
 	selectable_flags : SelectableFlags = {}
 ) {
+  	label  := strings.clone_to_cstring(label, context.temp_allocator)
 	values := reflect.enum_field_values(T)
 	names  := reflect.enum_field_names(T)
 	current_value_index := slice.linear_search(values, T(value^)) or_else 0 
@@ -86,8 +126,9 @@ ComboUnion :: proc(
 	}
 }
 
-InputDateTime :: proc(label: cstring, value: ^time.Time, help_text := "") {
+InputDateTime :: proc(label: string, value: ^time.Time, help_text := "") {
 	label := fmt.tprintf("%v\n%v###%v\x00", label, value^, label)
+	
 	if TreeNode(cstring(raw_data(label))) {
 		if help_text != "" {
 			SameLine()
@@ -138,7 +179,9 @@ InputDateTime :: proc(label: cstring, value: ^time.Time, help_text := "") {
 	}
 }
 
-TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclick_struct_callback: proc(any) = nil) {
+TreeNodeAny :: proc(label: string, value: any, flags: TreeNodeFlags = {}, rclick_struct_callback: proc(any) = nil) {
+  	clabel := strings.clone_to_cstring(label, context.temp_allocator)
+
 	using runtime
 	value_data, value_id := reflect.any_data(value)
 	if value_data == nil do return
@@ -159,7 +202,7 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 	DoVariant: {
 		#partial switch tiv in ti.variant {
 			case Type_Info_Struct:
-				if TreeNodeEx(label, flags) {
+				if TreeNodeEx(clabel, flags) {
 					member_count := len(tiv.names)
 					for i in 0..<member_count {
 							type   := tiv.types  [i]
@@ -169,7 +212,7 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 							data = mem.ptr_offset(cast(^byte)value_data, offset),
 							id   = type.id,
 						}
-						TreeNodeAny(cstring(raw_data(name)), transmute(any) member_any, flags, rclick_struct_callback)
+						TreeNodeAny(name, transmute(any) member_any, flags, rclick_struct_callback)
 					}
 					TreePop()
 				}
@@ -192,7 +235,7 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 								}
 								value : i32
 								dynamic_int_cast(value, elem_any)
-								InputInt(label, &value)
+								InputInt(clabel, &value)
 								dynamic_int_cast(elem_any, value)
 								return
 							case 2:
@@ -203,7 +246,7 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 								values : [2] i32 
 								dynamic_int_cast(values[0], elem_any[0])
 								dynamic_int_cast(values[1], elem_any[1])
-								InputInt2(label, &values, {})
+								InputInt2(clabel, &values, {})
 								dynamic_int_cast(elem_any[0], values[0])
 								dynamic_int_cast(elem_any[1], values[1])
 								return
@@ -217,7 +260,7 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 								dynamic_int_cast(values[0], elem_any[0])
 								dynamic_int_cast(values[1], elem_any[1])
 								dynamic_int_cast(values[2], elem_any[2])
-								InputInt3(label, &values, {})
+								InputInt3(clabel, &values, {})
 								dynamic_int_cast(elem_any[0], values[0])
 								dynamic_int_cast(elem_any[1], values[1])
 								dynamic_int_cast(elem_any[2], values[2])
@@ -234,7 +277,7 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 								dynamic_int_cast(values[1], elem_any[1])
 								dynamic_int_cast(values[2], elem_any[2])
 								dynamic_int_cast(values[3], elem_any[3])
-								InputInt4(label, &values, {})
+								InputInt4(clabel, &values, {})
 								dynamic_int_cast(elem_any[0], values[0])
 								dynamic_int_cast(elem_any[1], values[1])
 								dynamic_int_cast(elem_any[2], values[2])
@@ -250,7 +293,7 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 								}
 								f32_value, ok := get_f32_value(elem_any)
 								if !ok do break DoVariant
-								InputFloat(label, &f32_value)
+								InputFloat(clabel, &f32_value)
 								set_f32_value(elem_any, f32_value)
 								return
 							case 2:
@@ -263,7 +306,7 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 								values[0], ok = get_f32_value(elem_any[0])
 								values[1], ok = get_f32_value(elem_any[1])
 								if !ok do break DoVariant
-								InputFloat2(label, &values)
+								InputFloat2(clabel, &values)
 								set_f32_value(elem_any[0], values[0])
 								set_f32_value(elem_any[1], values[1])
 								return
@@ -279,7 +322,7 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 								values[1], ok = get_f32_value(elem_any[1])
 								values[2], ok = get_f32_value(elem_any[2])
 								if !ok do break DoVariant
-								InputFloat3(label, &values)
+								InputFloat3(clabel, &values)
 								set_f32_value(elem_any[0], values[0])
 								set_f32_value(elem_any[1], values[1])
 								set_f32_value(elem_any[2], values[2])
@@ -298,7 +341,7 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 								values[2], ok = get_f32_value(elem_any[2])
 								values[3], ok = get_f32_value(elem_any[3])
 								if !ok do break DoVariant
-								InputFloat4(label, &values)
+								InputFloat4(clabel, &values)
 								set_f32_value(elem_any[0], values[0])
 								set_f32_value(elem_any[1], values[1])
 								set_f32_value(elem_any[2], values[2])
@@ -306,13 +349,13 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 								return
 						}
 				}
-				if TreeNodeEx(label, flags) {
+				if TreeNodeEx(clabel, flags) {
 					for i in 0..<tiv.count {
 						elem_any := runtime.Raw_Any {
 							data = mem.ptr_offset(cast(^byte)value_data, i * tiv.elem_size),
 							id   = tiv.elem.id,
 						}
-						TreeNodeAny(cstring(raw_data(fmt.tprintf("%v", i))), transmute(any) elem_any, flags, rclick_struct_callback)
+						TreeNodeAny(fmt.tprintf("%v", i), transmute(any) elem_any, flags, rclick_struct_callback)
 					}
 					TreePop()
 				}
@@ -330,13 +373,13 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 				// 	InputText(label, cstring(raw_slice.data), uint(raw_slice.len), {})
 				// 	return
 				// }
-				if TreeNodeEx(label, flags) {
+				if TreeNodeEx(clabel, flags) {
 					for i in 0..<raw_slice.len {
 						elem_any := runtime.Raw_Any {
 							data = mem.ptr_offset(cast(^byte)value_data, i * tiv.elem_size),
 							id   = tiv.elem.id,
 						}
-						TreeNodeAny(cstring(raw_data(fmt.tprintf("%v", i))), transmute(any) elem_any, flags, rclick_struct_callback)
+						TreeNodeAny(fmt.tprintf("%v", i), transmute(any) elem_any, flags, rclick_struct_callback)
 					}
 					TreePop()
 				}
@@ -351,13 +394,13 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 				// 	InputTextDynamic(label, transmute(^[dynamic]u8)(value.data))
 				// 	return
 				// }
-				if TreeNodeEx(label, flags) {
+				if TreeNodeEx(clabel, flags) {
 					for i in 0..<raw_dynamic_array.len {
 						elem_any := runtime.Raw_Any {
 							data = mem.ptr_offset(cast(^byte)raw_dynamic_array.data, i * tiv.elem_size),
 							id   = tiv.elem.id,
 						}
-						TreeNodeAny(cstring(raw_data(fmt.tprintf("%v", i))), transmute(any) elem_any, flags, rclick_struct_callback)
+						TreeNodeAny(fmt.tprintf("%v", i), transmute(any) elem_any, flags, rclick_struct_callback)
 					}
 					TreePop()
 				}
@@ -370,21 +413,21 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 			case Type_Info_Integer:
 				i32_value : i32
 				dynamic_int_cast(i32_value, value)
-				InputInt(label, &i32_value)
+				InputInt(clabel, &i32_value)
 				dynamic_int_cast(value, i32_value)
 				return
 	
 			case Type_Info_Float: 
 				f32_value, ok := get_f32_value(value)
 				if !ok do break DoVariant
-				InputFloat(label, &f32_value)
+				InputFloat(clabel, &f32_value)
 				set_f32_value(value, f32_value)
 				return
 	
 			case Type_Info_Boolean:
 				bool_value : bool
 				if !dynamic_int_cast(bool_value, value) do break DoVariant
-				if (RadioButton(label, bool_value)) { 
+				if (RadioButton(clabel, bool_value)) { 
 					bool_value = !bool_value 
 				} 
 				dynamic_int_cast(value, bool_value)
@@ -393,7 +436,7 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 			case Type_Info_Bit_Set:
 				set : bit_set[0..<128]
 				dynamic_int_cast(set, value)
-				if TreeNodeEx(label, flags) {
+				if TreeNodeEx(clabel, flags) {
 					#partial switch elem_tiv in type_info_base(tiv.elem).variant {
 						case Type_Info_Integer:
 							for i in tiv.lower..=tiv.upper {
@@ -484,30 +527,87 @@ TreeNodeAny :: proc(label: cstring, value: any, flags: TreeNodeFlags = {}, rclic
 // 	EndDisabled()
 // }
 
+// also works for enum and boolean types, for the sake of convenience
 @(private)
 dynamic_int_cast :: proc(dst, src: any, enforce_size := false) -> bool {
-	using runtime
-	src := transmute(Raw_Any) src
-	dst := transmute(Raw_Any) dst
+    using runtime
+  
+    ti_src := type_info_base(type_info_of(src.id))
+    ti_dst := type_info_base(type_info_of(dst.id))
+  
+    if enforce_size && ti_src.size > ti_dst.size {
+        return false
+    }
+  
+    // This is kind of an ugly solution
+    // But basically, just filter out all types which are not int, enum, or bool types
+    #partial switch tiv in ti_src.variant {
+        case Type_Info_Integer:
+        case Type_Info_Enum:
+        case Type_Info_Boolean:
+        case Type_Info_Bit_Set:
+        case: return false
+    }
+    #partial switch tiv in ti_dst.variant {
+        case Type_Info_Integer:
+        case Type_Info_Enum:
+        case Type_Info_Boolean:
+        case Type_Info_Bit_Set:
+        case: return false
+    }
+  
+    i64_value: i64
+  
+    switch ti_src.size {
+        case 1 : i64_value = auto_cast (cast(^i8  )src.data)^
+        case 2 : i64_value = auto_cast (cast(^i16 )src.data)^
+        case 4 : i64_value = auto_cast (cast(^i32 )src.data)^
+        case 8 : i64_value = auto_cast (cast(^i64 )src.data)^
+        case 16: i64_value = auto_cast (cast(^i128)src.data)^
+    }
+  
+    switch ti_dst.size {
+        case 1 : (cast(^i8  )dst.data)^ = auto_cast i64_value
+        case 2 : (cast(^i16 )dst.data)^ = auto_cast i64_value
+        case 4 : (cast(^i32 )dst.data)^ = auto_cast i64_value
+        case 8 : (cast(^i64 )dst.data)^ = auto_cast i64_value
+        case 16: (cast(^i128)dst.data)^ = auto_cast i64_value
+    }
+  
+    return true
+}
 
-	ti_src := type_info_base(type_info_of(src.id))
-	ti_dst := type_info_base(type_info_of(dst.id))
-
-	if enforce_size && ti_src.size > ti_dst.size {
-		return false
-	}
-
-	for ti in ([]^Type_Info { ti_src, ti_dst }) {
-		#partial switch ti_var in ti.variant {
-			case Type_Info_Enum:
-			case Type_Info_Bit_Set:
-			case Type_Info_Integer:
-			case Type_Info_Boolean:
-			case: return false
-		}
-	}
-
-	mem.copy(dst.data, src.data, min(ti_dst.size, ti_src.size))
-	return true
+@(private)
+dynamic_float_cast :: proc(dst, src: any, enforce_size := false) -> bool {
+    using runtime
+  
+    ti_src := type_info_base(type_info_of(src.id))
+    ti_dst := type_info_base(type_info_of(dst.id))
+  
+    if enforce_size && ti_src.size > ti_dst.size {
+        return false
+    }
+  
+    _, allow_src := ti_src.variant.(Type_Info_Float)
+    _, allow_dst := ti_dst.variant.(Type_Info_Float)
+    if !allow_src || !allow_dst {
+        return false
+    }
+  
+    f64_value: f64
+  
+    switch ti_src.size {
+        case 2: f64_value = auto_cast (cast(^f16)src.data)^
+        case 4: f64_value = auto_cast (cast(^f32)src.data)^
+        case 8: f64_value = auto_cast (cast(^f64)src.data)^
+    }
+  
+    switch ti_dst.size {
+        case 2: (cast(^f16)dst.data)^ = auto_cast f64_value
+        case 4: (cast(^f32)dst.data)^ = auto_cast f64_value
+        case 8: (cast(^f64)dst.data)^ = auto_cast f64_value
+    }
+  
+    return true
 }
 
