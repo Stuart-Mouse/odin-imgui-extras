@@ -5,11 +5,11 @@ import "core:math"
 import "core:time"
 import "core:slice"
 import "core:reflect"
-import "core:runtime"
+import "base:runtime"
 import "core:mem"
 import "core:fmt"
 import "core:strings"
-import "core:intrinsics"
+import "base:intrinsics"
 
 
 /*
@@ -28,10 +28,10 @@ ComboHash :: proc(
 ) {
 	label := strings.clone_to_cstring(label, context.temp_allocator)
     
-    selected_key_string := fmt.tprintf("%v\x00", selected)
+    selected_key_string := cstring(raw_data(fmt.tprintf("%v\x00", selected)))
     if BeginCombo(label, selected_key_string, combo_flags) {
         for k in _map {
-            key_string := fmt.tprintf("%v\x00", k)
+            key_string := cstring(raw_data(fmt.tprintf("%v\x00", k)))
             if SelectableEx(key_string, selected^ == k, selectable_flags, {}) {
 				selected^ = k
 			}
@@ -67,7 +67,7 @@ ComboEnumDynamic :: proc(
 	value            : any, 
 	combo_flags      : ComboFlags = {}, 
 	selectable_flags : SelectableFlags = {}
-  ) {
+) {
   	label := strings.clone_to_cstring(label, context.temp_allocator)
   
 	ti := type_info_of(value.id)
@@ -192,10 +192,10 @@ TreeNodeAny :: proc(label: string, value: any, flags: TreeNodeFlags = {}, rclick
 			return
 	}
 
-	ti := type_info_of(value_id)
-	if ti_named, ok := ti.variant.(Type_Info_Named); ok {
-		ti = ti_named.base
-	}
+	ti := runtime.type_info_base(type_info_of(value_id))
+    // if ti_named, ok := ti.variant.(Type_Info_Named); ok {
+    // 	ti = ti_named.base
+    // }
   
 	// all variant cases will return on success
 	// breaking from this block will do the generic case
@@ -203,12 +203,11 @@ TreeNodeAny :: proc(label: string, value: any, flags: TreeNodeFlags = {}, rclick
 		#partial switch tiv in ti.variant {
 			case Type_Info_Struct:
 				if TreeNodeEx(clabel, flags) {
-					member_count := len(tiv.names)
-					for i in 0..<member_count {
-							type   := tiv.types  [i]
-							name   := tiv.names  [i]
-							offset := tiv.offsets[i]
-							member_any  := Raw_Any {
+					for i in 0..<tiv.field_count {
+						type   := tiv.types  [i]
+						name   := tiv.names  [i]
+						offset := tiv.offsets[i]
+						member_any  := Raw_Any {
 							data = mem.ptr_offset(cast(^byte)value_data, offset),
 							id   = type.id,
 						}
@@ -369,14 +368,14 @@ TreeNodeAny :: proc(label: string, value: any, flags: TreeNodeFlags = {}, rclick
 				if raw_slice.data == nil {
 					break DoVariant
 				}
-				// if tiv.elem.id == u8 {
-				// 	InputText(label, cstring(raw_slice.data), uint(raw_slice.len), {})
-				// 	return
-				// }
+                // if tiv.elem.id == u8 {
+                // 	InputText(clabel, cstring(raw_slice.data), uint(raw_slice.len), {})
+                // 	return
+                // }
 				if TreeNodeEx(clabel, flags) {
 					for i in 0..<raw_slice.len {
 						elem_any := runtime.Raw_Any {
-							data = mem.ptr_offset(cast(^byte)value_data, i * tiv.elem_size),
+							data = mem.ptr_offset(cast(^byte)raw_slice.data, i * tiv.elem_size),
 							id   = tiv.elem.id,
 						}
 						TreeNodeAny(fmt.tprintf("%v", i), transmute(any) elem_any, flags, rclick_struct_callback)
