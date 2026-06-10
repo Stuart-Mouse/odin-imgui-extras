@@ -20,575 +20,447 @@ import "base:intrinsics"
     TODO: implement a dynamic version
 */
 ComboHash :: proc(
-    label            : string, 
-    _map             : ^$T/map[$K]$V, 
-    selected         : ^K, 
-    combo_flags      : ComboFlags      = {}, 
-    selectable_flags : SelectableFlags = {},
+    label:              string, 
+    _map:               ^$T/map[$K]$V, 
+    selected:           ^K, 
+    combo_flags:        ComboFlags      = {}, 
+    selectable_flags:   SelectableFlags = {},
 ) {
-	label := strings.clone_to_cstring(label, context.temp_allocator)
+    label := strings.clone_to_cstring(label, context.temp_allocator)
     
     selected_key_string := cstring(raw_data(fmt.tprintf("%v\x00", selected)))
     if BeginCombo(label, selected_key_string, combo_flags) {
         for k in _map {
             key_string := cstring(raw_data(fmt.tprintf("%v\x00", k)))
             if SelectableEx(key_string, selected^ == k, selectable_flags, {}) {
-				selected^ = k
-			}
+                selected^ = k
+            }
         }
-		EndCombo()
+        EndCombo()
     }
 }
 
 ComboEnum :: proc(
-    label: string, 
-    value: ^$T, 
-    combo_flags: ComboFlags           = {}, 
-    selectable_flags: SelectableFlags = {}
+    label:              string, 
+    value:              ^$T, 
+    combo_flags:        ComboFlags      = {}, 
+    selectable_flags:   SelectableFlags = {}
 ) where intrinsics.type_is_enum(T) {
-	label  := strings.clone_to_cstring(label, context.temp_allocator)
-	values := reflect.enum_field_values(T)
-	names  := reflect.enum_field_names(T)
-	current_value_index := slice.linear_search(values, auto_cast value^) or_else 0 // Could we use binary search? need to find out if values are always ordered...
-	current_value_name  := names[current_value_index]
-	if BeginCombo(label, cstring(raw_data(current_value_name)), combo_flags) {
-		for i in 0..<len(values) {
-			if SelectableEx(cstring(raw_data(names[i])), value^ == T(values[i]), selectable_flags, {}) {
-				value^ = T(values[i])
-			}
-		}
-		EndCombo()
-	}
+    label  := strings.clone_to_cstring(label, context.temp_allocator)
+    values := reflect.enum_field_values(T)
+    names  := reflect.enum_field_names(T)
+    current_value_index := slice.linear_search(values, auto_cast value^) or_else 0 // Could we use binary search? need to find out if values are always ordered...
+    current_value_name  := names[current_value_index]
+    if BeginCombo(label, cstring(raw_data(current_value_name)), combo_flags) {
+        for i in 0..<len(values) {
+            if Selectable(cstring(raw_data(names[i])), value^ == T(values[i]), selectable_flags, {}) {
+                value^ = T(values[i])
+            }
+        }
+        EndCombo()
+    }
 }
 
 // If the given type is not an enum, the procedure will do nothing and return
 ComboEnumDynamic :: proc(
-	label            : string, 
-	value            : any, 
-	combo_flags      : ComboFlags = {}, 
-	selectable_flags : SelectableFlags = {}
+    label:              string, 
+    value:              any, 
+    combo_flags:        ComboFlags      = {}, 
+    selectable_flags:   SelectableFlags = {}
 ) {
-  	label := strings.clone_to_cstring(label, context.temp_allocator)
+      label := strings.clone_to_cstring(label, context.temp_allocator)
   
-	ti := type_info_of(value.id)
-	if ti_named, ok := ti.variant.(runtime.Type_Info_Named); ok {
-	  	ti = ti_named.base
-	}
-	tiv, ok := ti.variant.(runtime.Type_Info_Enum)
-	if !ok do return
+    ti := type_info_of(value.id)
+    if ti_named, ok := ti.variant.(runtime.Type_Info_Named); ok {
+          ti = ti_named.base
+    }
+    ti_variant, ok := ti.variant.(runtime.Type_Info_Enum)
+    if !ok do return
   
-	enum_value : runtime.Type_Info_Enum_Value
-	switch ti.size {
-		case 1: enum_value = auto_cast ((^u8 )(value.data))^
-		case 2: enum_value = auto_cast ((^u16)(value.data))^
-		case 4: enum_value = auto_cast ((^u32)(value.data))^
-		case 8: enum_value = auto_cast ((^u64)(value.data))^
-	}
+    enum_value : runtime.Type_Info_Enum_Value
+    switch ti.size {
+      case 1: enum_value = auto_cast ((^u8 )(value.data))^
+      case 2: enum_value = auto_cast ((^u16)(value.data))^
+      case 4: enum_value = auto_cast ((^u32)(value.data))^
+      case 8: enum_value = auto_cast ((^u64)(value.data))^
+    }
   
-	current_value_index := slice.linear_search(tiv.values, enum_value) or_else 0 
-	current_value_name  := tiv.names[current_value_index]
-	
-	if BeginCombo(label, cstring(raw_data(current_value_name)), combo_flags) {
-		for i in 0..<len(tiv.values) {
-			if SelectableEx(cstring(raw_data(tiv.names[i])), enum_value == tiv.values[i], selectable_flags, {}) {
-				enum_value = tiv.values[i]
-			}
-		}
-		EndCombo()
-	}
+    current_value_index := slice.linear_search(ti_variant.values, enum_value) or_else 0 
+    current_value_name  := ti_variant.names[current_value_index]
+    
+    if BeginCombo(label, cstring(raw_data(current_value_name)), combo_flags) {
+        for i in 0..<len(ti_variant.values) {
+            if Selectable(cstring(raw_data(ti_variant.names[i])), enum_value == ti_variant.values[i], selectable_flags, {}) {
+                enum_value = ti_variant.values[i]
+            }
+        }
+        EndCombo()
+    }
   
-	switch ti.size {
-		case 1: ((^u8 )(value.data))^ = auto_cast enum_value
-		case 2: ((^u16)(value.data))^ = auto_cast enum_value
-		case 4: ((^u32)(value.data))^ = auto_cast enum_value
-		case 8: ((^u64)(value.data))^ = auto_cast enum_value
-	}
+    switch ti.size {
+      case 1: ((^u8 )(value.data))^ = auto_cast enum_value
+      case 2: ((^u16)(value.data))^ = auto_cast enum_value
+      case 4: ((^u32)(value.data))^ = auto_cast enum_value
+      case 8: ((^u64)(value.data))^ = auto_cast enum_value
+    }
 }
 
 ComboUnion :: proc(
-	label            : string, 
-	value            : ^$T, 
-	combo_flags      : ComboFlags = {}, 
-	selectable_flags : SelectableFlags = {}
+    label            : string, 
+    value            : ^$T, 
+    combo_flags      : ComboFlags = {}, 
+    selectable_flags : SelectableFlags = {}
 ) {
-  	label  := strings.clone_to_cstring(label, context.temp_allocator)
-	values := reflect.enum_field_values(T)
-	names  := reflect.enum_field_names(T)
-	current_value_index := slice.linear_search(values, T(value^)) or_else 0 
-	current_value_name  := names[current_value_index]
-	if BeginCombo(label, cstring(raw_data(current_value_name)), combo_flags) {
-		for i in 0..<len(values) {
-			if SelectableEx(cstring(raw_data(names[i])), value^ == T(values[i]), selectable_flags, {}) {
-			value^ = T(values[i])
-			}
-		}
-		EndCombo()
-	}
+    label  := strings.clone_to_cstring(label, context.temp_allocator)
+    values := reflect.enum_field_values(T)
+    names  := reflect.enum_field_names(T)
+    current_value_index := slice.linear_search(values, T(value^)) or_else 0 
+    current_value_name  := names[current_value_index]
+    if BeginCombo(label, cstring(raw_data(current_value_name)), combo_flags) {
+        for i in 0..<len(values) {
+            if SelectableEx(cstring(raw_data(names[i])), value^ == T(values[i]), selectable_flags, {}) {
+            value^ = T(values[i])
+            }
+        }
+        EndCombo()
+    }
 }
 
 InputDateTime :: proc(label: string, value: ^time.Time, help_text := "") {
-	label := fmt.tprintf("%v\n%v###%v\x00", label, value^, label)
-	
-	if TreeNode(cstring(raw_data(label))) {
-		if help_text != "" {
-			SameLine()
-			HelpMarker(help_text)
-		}
+    label := fmt.tprintf("%v\n%v###%v\x00", label, value^, label)
+    
+    if TreeNode(cstring(raw_data(label))) {
+        if help_text != "" {
+            SameLine()
+            HelpMarker(help_text)
+        }
+        
+        year, month, day     := time.date(value^)
+        hour, minute, second := time.clock(value^)
+        
+        SetNextItemWidth(100)
+        InputInt("###Day", transmute(^i32) &day)
+        day = clamp(day, 1, 31)
 
-		year, month, day     := time.date(value^)
-		hour, minute, second := time.clock(value^)
+        SameLine()
+        SetNextItemWidth(100)
+        ComboEnum("###Month", &month)
 
-		SetNextItemWidth(100)
-		InputInt("###Day", transmute(^i32) &day)
-		day = clamp(day, 1, 31)
+        SameLine()
+        SetNextItemWidth(100) 
+        InputInt("Date###Year", transmute(^i32) &year)
+        year = clamp(year, 1970, 3000)
 
-		SameLine()
-		SetNextItemWidth(100)
-		ComboEnum("###Month", &month)
+        SetNextItemWidth(100)
+        InputInt("###Hour", transmute(^i32) &hour)
+        hour = clamp(hour, 0, 23)
 
-		SameLine()
-		SetNextItemWidth(100) 
-		InputInt("Date###Year", transmute(^i32) &year)
-		year = clamp(year, 1970, 3000)
+        SameLine()
+        SetNextItemWidth(100)
+        InputInt("###Minute", transmute(^i32) &minute)
+        minute = clamp(minute, 0, 59)
 
-		SetNextItemWidth(100)
-		InputInt("###Hour", transmute(^i32) &hour)
-		hour = clamp(hour, 0, 23)
+        SameLine()
+        SetNextItemWidth(100)
+        InputInt("Time###Second", transmute(^i32) &second)
+        second = clamp(second, 0, 59)
 
-		SameLine()
-		SetNextItemWidth(100)
-		InputInt("###Minute", transmute(^i32) &minute)
-		minute = clamp(minute, 0, 59)
-
-		SameLine()
-		SetNextItemWidth(100)
-		InputInt("Time###Second", transmute(^i32) &second)
-		second = clamp(second, 0, 59)
-
-		result, ok := time.datetime_to_time(year, int(month), day, hour, minute, second)
-		if !ok {
-			TextUnformatted("Unable to parse date/time!")
-		} else {
-			value^ = result
-		}
-		TreePop()
-	} 
-	else if help_text != "" {
-		SameLine()
-		HelpMarker(help_text)
-	}
+        result, ok := time.datetime_to_time(year, int(month), day, hour, minute, second)
+        if !ok {
+            TextUnformatted("Unable to parse date/time!")
+        } else {
+            value^ = result
+        }
+        TreePop()
+    } 
+    else if help_text != "" {
+        SameLine()
+        HelpMarker(help_text)
+    }
 }
 
+// TODO: add support for fixed-capacity resizable arrays, add support for editting string-like arrays as text
 TreeNodeAny :: proc(label: string, value: any, flags: TreeNodeFlags = {}, rclick_struct_callback: proc(any) = nil) {
-  	clabel := strings.clone_to_cstring(label, context.temp_allocator)
+    clabel := strings.clone_to_cstring(label, context.temp_allocator)
 
-	using runtime
-	value_data, value_id := reflect.any_data(value)
-	if value_data == nil do return
-  
-	switch value_id {
-		case typeid_of(time.Time):
-			InputDateTime(label, auto_cast value_data)
-			return
-	}
+    if value.data == nil do return
+    
+    switch value.id {
+      case typeid_of(time.Time):
+        InputDateTime(label, auto_cast value.data)
+        return
+    }
 
-	ti := runtime.type_info_base(type_info_of(value_id))
+    ti := runtime.type_info_base(type_info_of(value.id))
     // if ti_named, ok := ti.variant.(Type_Info_Named); ok {
-    // 	ti = ti_named.base
+    //     ti = ti_named.base
     // }
   
-	// all variant cases will return on success
-	// breaking from this block will do the generic case
-	DoVariant: {
-		#partial switch tiv in ti.variant {
-			case Type_Info_Struct:
-				if TreeNodeEx(clabel, flags) {
-					for i in 0..<tiv.field_count {
-						type   := tiv.types  [i]
-						name   := tiv.names  [i]
-						offset := tiv.offsets[i]
-						member_any  := Raw_Any {
-							data = mem.ptr_offset(cast(^byte)value_data, offset),
-							id   = type.id,
-						}
-						TreeNodeAny(name, transmute(any) member_any, flags, rclick_struct_callback)
-					}
-					TreePop()
-				}
-				if IsItemClickedEx(.Right) && rclick_struct_callback != nil {
-					rclick_struct_callback(value)
-				}
-				return
-	
-			case Type_Info_Array:
-				// if tiv.elem.id == u8 {
-				// 	InputText(label, cstring(value_data), uint(tiv.count), {})
-				// 	return
-				// }
-				#partial switch tie in type_info_base(tiv.elem).variant {
-					case Type_Info_Integer: 
-						switch tiv.count {
-							case 1:
-								elem_any := transmute(any) runtime.Raw_Any {
-									data = mem.ptr_offset(cast(^byte)value_data, 0 * tiv.elem_size), id = tiv.elem.id,
-								}
-								value : i32
-								dynamic_int_cast(value, elem_any)
-								InputInt(clabel, &value)
-								dynamic_int_cast(elem_any, value)
-								return
-							case 2:
-								elem_any := transmute([2]any) [2]runtime.Raw_Any {
-									{ data = mem.ptr_offset(cast(^byte)value_data, 0 * tiv.elem_size), id = tiv.elem.id }, 
-									{ data = mem.ptr_offset(cast(^byte)value_data, 1 * tiv.elem_size), id = tiv.elem.id },
-								}
-								values : [2] i32 
-								dynamic_int_cast(values[0], elem_any[0])
-								dynamic_int_cast(values[1], elem_any[1])
-								InputInt2(clabel, &values, {})
-								dynamic_int_cast(elem_any[0], values[0])
-								dynamic_int_cast(elem_any[1], values[1])
-								return
-							case 3:
-								elem_any := transmute([3]any) [3]runtime.Raw_Any {
-									{ data = mem.ptr_offset(cast(^byte)value_data, 0 * tiv.elem_size), id = tiv.elem.id }, 
-									{ data = mem.ptr_offset(cast(^byte)value_data, 1 * tiv.elem_size), id = tiv.elem.id },
-									{ data = mem.ptr_offset(cast(^byte)value_data, 2 * tiv.elem_size), id = tiv.elem.id },
-								}
-								values : [3] i32 
-								dynamic_int_cast(values[0], elem_any[0])
-								dynamic_int_cast(values[1], elem_any[1])
-								dynamic_int_cast(values[2], elem_any[2])
-								InputInt3(clabel, &values, {})
-								dynamic_int_cast(elem_any[0], values[0])
-								dynamic_int_cast(elem_any[1], values[1])
-								dynamic_int_cast(elem_any[2], values[2])
-								return
-							case 4:
-								elem_any := transmute([4]any) [4]runtime.Raw_Any {
-									{ data = mem.ptr_offset(cast(^byte)value_data, 0 * tiv.elem_size), id = tiv.elem.id }, 
-									{ data = mem.ptr_offset(cast(^byte)value_data, 1 * tiv.elem_size), id = tiv.elem.id },
-									{ data = mem.ptr_offset(cast(^byte)value_data, 2 * tiv.elem_size), id = tiv.elem.id },
-									{ data = mem.ptr_offset(cast(^byte)value_data, 3 * tiv.elem_size), id = tiv.elem.id },
-								}
-								values : [4] i32 
-								dynamic_int_cast(values[0], elem_any[0])
-								dynamic_int_cast(values[1], elem_any[1])
-								dynamic_int_cast(values[2], elem_any[2])
-								dynamic_int_cast(values[3], elem_any[3])
-								InputInt4(clabel, &values, {})
-								dynamic_int_cast(elem_any[0], values[0])
-								dynamic_int_cast(elem_any[1], values[1])
-								dynamic_int_cast(elem_any[2], values[2])
-								dynamic_int_cast(elem_any[3], values[3])
-								return
-						}
-					
-					case Type_Info_Float: 
-						switch tiv.count {
-							case 1:
-								elem_any := transmute(any) runtime.Raw_Any {
-									data = mem.ptr_offset(cast(^byte)value_data, 0 * tiv.elem_size), id = tiv.elem.id,
-								}
-								f32_value, ok := get_f32_value(elem_any)
-								if !ok do break DoVariant
-								InputFloat(clabel, &f32_value)
-								set_f32_value(elem_any, f32_value)
-								return
-							case 2:
-								elem_any := transmute([2]any) [2]runtime.Raw_Any {
-									{ data = mem.ptr_offset(cast(^byte)value_data, 0 * tiv.elem_size), id = tiv.elem.id }, 
-									{ data = mem.ptr_offset(cast(^byte)value_data, 1 * tiv.elem_size), id = tiv.elem.id },
-								}
-								values : [2] f32 
-								ok : bool
-								values[0], ok = get_f32_value(elem_any[0])
-								values[1], ok = get_f32_value(elem_any[1])
-								if !ok do break DoVariant
-								InputFloat2(clabel, &values)
-								set_f32_value(elem_any[0], values[0])
-								set_f32_value(elem_any[1], values[1])
-								return
-							case 3:
-								elem_any := transmute([3]any) [3]runtime.Raw_Any {
-									{ data = mem.ptr_offset(cast(^byte)value_data, 0 * tiv.elem_size), id = tiv.elem.id }, 
-									{ data = mem.ptr_offset(cast(^byte)value_data, 1 * tiv.elem_size), id = tiv.elem.id },
-									{ data = mem.ptr_offset(cast(^byte)value_data, 2 * tiv.elem_size), id = tiv.elem.id },
-								}
-								values : [3] f32 
-								ok : bool
-								values[0], ok = get_f32_value(elem_any[0])
-								values[1], ok = get_f32_value(elem_any[1])
-								values[2], ok = get_f32_value(elem_any[2])
-								if !ok do break DoVariant
-								InputFloat3(clabel, &values)
-								set_f32_value(elem_any[0], values[0])
-								set_f32_value(elem_any[1], values[1])
-								set_f32_value(elem_any[2], values[2])
-								return
-							case 4:
-								elem_any := transmute([4]any) [4]runtime.Raw_Any {
-									{ data = mem.ptr_offset(cast(^byte)value_data, 0 * tiv.elem_size), id = tiv.elem.id }, 
-									{ data = mem.ptr_offset(cast(^byte)value_data, 1 * tiv.elem_size), id = tiv.elem.id },
-									{ data = mem.ptr_offset(cast(^byte)value_data, 2 * tiv.elem_size), id = tiv.elem.id },
-									{ data = mem.ptr_offset(cast(^byte)value_data, 3 * tiv.elem_size), id = tiv.elem.id },
-								}
-								values : [4] f32 
-								ok : bool
-								values[0], ok = get_f32_value(elem_any[0])
-								values[1], ok = get_f32_value(elem_any[1])
-								values[2], ok = get_f32_value(elem_any[2])
-								values[3], ok = get_f32_value(elem_any[3])
-								if !ok do break DoVariant
-								InputFloat4(clabel, &values)
-								set_f32_value(elem_any[0], values[0])
-								set_f32_value(elem_any[1], values[1])
-								set_f32_value(elem_any[2], values[2])
-								set_f32_value(elem_any[3], values[3])
-								return
-						}
-				}
-				if TreeNodeEx(clabel, flags) {
-					for i in 0..<tiv.count {
-						elem_any := runtime.Raw_Any {
-							data = mem.ptr_offset(cast(^byte)value_data, i * tiv.elem_size),
-							id   = tiv.elem.id,
-						}
-						TreeNodeAny(fmt.tprintf("%v", i), transmute(any) elem_any, flags, rclick_struct_callback)
-					}
-					TreePop()
-				}
-				if IsItemClickedEx(.Right) && rclick_struct_callback != nil {
-					rclick_struct_callback(value)
-				}
-				return
-	
-			case Type_Info_Slice:
-				raw_slice := (transmute(^Raw_Slice) value.data)^
-				if raw_slice.data == nil {
-					break DoVariant
-				}
-                // if tiv.elem.id == u8 {
-                // 	InputText(clabel, cstring(raw_slice.data), uint(raw_slice.len), {})
-                // 	return
-                // }
-				if TreeNodeEx(clabel, flags) {
-					for i in 0..<raw_slice.len {
-						elem_any := runtime.Raw_Any {
-							data = mem.ptr_offset(cast(^byte)raw_slice.data, i * tiv.elem_size),
-							id   = tiv.elem.id,
-						}
-						TreeNodeAny(fmt.tprintf("%v", i), transmute(any) elem_any, flags, rclick_struct_callback)
-					}
-					TreePop()
-				}
-				return
-	
-			case Type_Info_Dynamic_Array:
-				raw_dynamic_array := (transmute(^Raw_Dynamic_Array) value.data)^
-				if raw_dynamic_array.data == nil {
-					break DoVariant
-				}
-				// if tiv.elem.id == u8 {
-				// 	InputTextDynamic(label, transmute(^[dynamic]u8)(value.data))
-				// 	return
-				// }
-				if TreeNodeEx(clabel, flags) {
-					for i in 0..<raw_dynamic_array.len {
-						elem_any := runtime.Raw_Any {
-							data = mem.ptr_offset(cast(^byte)raw_dynamic_array.data, i * tiv.elem_size),
-							id   = tiv.elem.id,
-						}
-						TreeNodeAny(fmt.tprintf("%v", i), transmute(any) elem_any, flags, rclick_struct_callback)
-					}
-					TreePop()
-				}
-				return
-	
-			case Type_Info_Enum:
-				ComboEnumDynamic(label, value)
-				return
-	
-			case Type_Info_Integer:
-				i32_value : i32
-				dynamic_int_cast(i32_value, value)
-				InputInt(clabel, &i32_value)
-				dynamic_int_cast(value, i32_value)
-				return
-	
-			case Type_Info_Float: 
-				f32_value, ok := get_f32_value(value)
-				if !ok do break DoVariant
-				InputFloat(clabel, &f32_value)
-				set_f32_value(value, f32_value)
-				return
-	
-			case Type_Info_Boolean:
-				bool_value : bool
-				if !dynamic_int_cast(bool_value, value) do break DoVariant
-				if (RadioButton(clabel, bool_value)) { 
-					bool_value = !bool_value 
-				} 
-				dynamic_int_cast(value, bool_value)
-				return
-	
-			case Type_Info_Bit_Set:
-				set : bit_set[0..<128]
-				dynamic_int_cast(set, value)
-				if TreeNodeEx(clabel, flags) {
-					#partial switch elem_tiv in type_info_base(tiv.elem).variant {
-						case Type_Info_Integer:
-							for i in tiv.lower..=tiv.upper {
-								if (RadioButton(cstring(raw_data(fmt.tprint(i))), int(i - tiv.lower) in set)) { 
-									set ~= { int(i - tiv.lower) }
-								}
-							}
-						case Type_Info_Rune:
-							for i in tiv.lower..=tiv.upper {
-								if (RadioButton(cstring(raw_data(fmt.tprint(rune(i)))), int(i - tiv.lower) in set)) { 
-									set ~= { int(i - tiv.lower) }
-								}
-							}
-						case Type_Info_Enum:
-							lower := slice.linear_search(elem_tiv.values, auto_cast tiv.lower) or_else 0
-							upper := slice.linear_search(elem_tiv.values, auto_cast tiv.upper) or_else 0
-							for i in lower..=upper {
-								if (RadioButton(cstring(raw_data(elem_tiv.names[i])), int(elem_tiv.values[i]) in set)) { 
-									set ~= { int(elem_tiv.values[i]) }
-								}
-							}
-					}
-					TreePop()
-				}
-				dynamic_int_cast(value, set)
-				return
+    // all variant cases will return on success
+    // breaking from this block will do the generic case
+    DoVariant: {
+        #partial switch ti_variant in ti.variant {
+          case runtime.Type_Info_Struct:
+            if TreeNodeEx(clabel, flags) {
+                for i in 0..<ti_variant.field_count {
+                    type   := ti_variant.types  [i]
+                    name   := ti_variant.names  [i]
+                    offset := ti_variant.offsets[i]
+                    member_any  := runtime.Raw_Any {
+                        data = mem.ptr_offset(cast(^byte)value.data, offset),
+                        id   = type.id,
+                    }
+                    TreeNodeAny(name, transmute(any) member_any, flags, rclick_struct_callback)
+                }
+                TreePop()
+            }
+            if IsItemClicked(.Right) && rclick_struct_callback != nil {
+                rclick_struct_callback(value)
+            }
+            return
 
-		
-			case Type_Info_String:
-				BulletText(cstring(raw_data(fmt.tprintf("%v: \"%v\"", label, value))))
-				return
-		}
-	}
+          case runtime.Type_Info_Array:
+            // if ti_variant.elem.id == u8 {
+            //     InputText(label, cstring(value.data), uint(ti_variant.count), {})
+            //     return
+            // }
+            
+            // If this is an array of few scalar elements, we present it in a more compact manner using InputScalarN.
+            #partial switch ti_elem_variant in runtime.type_info_base(ti_variant.elem).variant {
+              case runtime.Type_Info_Integer, runtime.Type_Info_Float: 
+                COMPACT_MODE_ELEMENT_COUNT :: 4
+                data_type := DetermineDataType(ti_variant.elem)
+                if data_type >= auto_cast 0 && ti_variant.count <= COMPACT_MODE_ELEMENT_COUNT {
+                    InputScalarN(clabel, data_type, value.data, cast(i32) ti_variant.count)
+                    return
+                }
+            }
+            
+            if TreeNodeEx(clabel, flags) {
+                for i in 0..<ti_variant.count {
+                    elem_any := runtime.Raw_Any {
+                        data = mem.ptr_offset(cast(^byte)value.data, i * ti_variant.elem_size),
+                        id   = ti_variant.elem.id,
+                    }
+                    TreeNodeAny(fmt.tprintf("%v", i), transmute(any) elem_any, flags, rclick_struct_callback)
+                }
+                TreePop()
+            }
+            if IsItemClicked(.Right) && rclick_struct_callback != nil {
+                rclick_struct_callback(value)
+            }
+            return
 
-	// generic case simply displays value with default formatting
-	BulletText(cstring(raw_data(fmt.tprintf("%v: %v", label, value))))
-	return
+          case runtime.Type_Info_Slice:
+            raw_slice := (transmute(^runtime.Raw_Slice) value.data)^
+            if raw_slice.data == nil {
+                break DoVariant
+            }
+            // if ti_variant.elem.id == u8 {
+            //     InputText(clabel, cstring(raw_slice.data), uint(raw_slice.len), {})
+            //     return
+            // }
+            if TreeNodeEx(clabel, flags) {
+                for i in 0..<raw_slice.len {
+                    elem_any := runtime.Raw_Any {
+                        data = mem.ptr_offset(cast(^byte)raw_slice.data, i * ti_variant.elem_size),
+                        id   = ti_variant.elem.id,
+                    }
+                    TreeNodeAny(fmt.tprintf("%v", i), transmute(any) elem_any, flags, rclick_struct_callback)
+                }
+                TreePop()
+            }
+            return
+            
+          case runtime.Type_Info_Fixed_Capacity_Dynamic_Array:
+            data_ptr := value.data
+            len_ptr  := cast(^int) mem.ptr_offset(cast(^byte) value.data, cast(int) ti_variant.len_offset)
+            
+            if ti_variant.elem.id == u8 {
+                c_str := cstring(data_ptr)
+                if InputText(clabel, c_str, uint(ti_variant.capacity), {}) {
+                    len_ptr^ = len(c_str)
+                }
+                return
+            }
+            
+            if TreeNodeEx(clabel, flags) {
+                // TODO: add logic to let user modify the current count, but keep it within valid bounds.
+                if InputScalar("len", .S64, len_ptr) {
+                    len_ptr^ = clamp(len_ptr^, 0, ti_variant.capacity)
+                }
+                
+                for i in 0..<len_ptr^ {
+                    elem_any := runtime.Raw_Any {
+                        data = mem.ptr_offset(cast(^byte)data_ptr, i * ti_variant.elem_size),
+                        id   = ti_variant.elem.id,
+                    }
+                    TreeNodeAny(fmt.tprintf("%v", i), transmute(any) elem_any, flags, rclick_struct_callback)
+                }
+                TreePop()
+            }
+            
+            return
+            
+          case runtime.Type_Info_Dynamic_Array:
+            raw_dynamic_array := (transmute(^runtime.Raw_Dynamic_Array) value.data)^
+            if raw_dynamic_array.data == nil {
+                break DoVariant
+            }
+            // if ti_variant.elem.id == u8 {
+            //     InputTextDynamic(label, transmute(^[dynamic]u8)(value.data))
+            //     return
+            // }
+            if TreeNodeEx(clabel, flags) {
+                for i in 0..<raw_dynamic_array.len {
+                    elem_any := runtime.Raw_Any {
+                        data = mem.ptr_offset(cast(^byte)raw_dynamic_array.data, i * ti_variant.elem_size),
+                        id   = ti_variant.elem.id,
+                    }
+                    TreeNodeAny(fmt.tprintf("%v", i), transmute(any) elem_any, flags, rclick_struct_callback)
+                }
+                TreePop()
+            }
+            return
+            
+          case runtime.Type_Info_Enum:
+            ComboEnumDynamic(label, value)
+            return
+            
+          case runtime.Type_Info_Integer:
+            data_type := DetermineDataType(ti)
+            if ti_variant.endianness == .Big {
+                reverse_bytes_in_place(value.data, ti.size)
+            }
+            InputScalar(clabel, data_type, value.data)
+            if ti_variant.endianness == .Big {
+                reverse_bytes_in_place(value.data, ti.size)
+            }
+            return
+            
+          case runtime.Type_Info_Float:
+            data_type := DetermineDataType(ti)
+            if ti_variant.endianness == .Big {
+                reverse_bytes_in_place(value.data, ti.size)
+            }
+            InputScalar(clabel, data_type, value.data)
+            if ti_variant.endianness == .Big {
+                reverse_bytes_in_place(value.data, ti.size)
+            }
+            return
+            
+          case runtime.Type_Info_Boolean:
+            bool_ptr := cast(^bool) value.data
+            if (RadioButton(clabel, bool_ptr^)) { 
+                bool_ptr^ = !bool_ptr^
+            }
+            return
+            
+          case runtime.Type_Info_Bit_Set:
+            set: bit_set[0..<128]
+            mem.copy(&set, value.data, ti.size);
+            
+            if TreeNodeEx(clabel, flags) {
+                #partial switch elem_tiv in runtime.type_info_base(ti_variant.elem).variant {
+                    case runtime.Type_Info_Integer:
+                        for i in ti_variant.lower..=ti_variant.upper {
+                            if (RadioButton(cstring(raw_data(fmt.tprint(i))), int(i - ti_variant.lower) in set)) { 
+                                set ~= { int(i - ti_variant.lower) }
+                            }
+                        }
+                    case runtime.Type_Info_Rune:
+                        for i in ti_variant.lower..=ti_variant.upper {
+                            if (RadioButton(cstring(raw_data(fmt.tprint(rune(i)))), int(i - ti_variant.lower) in set)) { 
+                                set ~= { int(i - ti_variant.lower) }
+                            }
+                        }
+                    case runtime.Type_Info_Enum:
+                        lower := slice.linear_search(elem_tiv.values, auto_cast ti_variant.lower) or_else 0
+                        upper := slice.linear_search(elem_tiv.values, auto_cast ti_variant.upper) or_else 0
+                        for i in lower..=upper {
+                            if (RadioButton(cstring(raw_data(elem_tiv.names[i])), int(elem_tiv.values[i]) in set)) { 
+                                set ~= { int(elem_tiv.values[i]) }
+                            }
+                        }
+                }
+                TreePop()
+            }
+            
+            mem.copy(value.data, &set, ti.size);
+            return
+            
+            
+          case runtime.Type_Info_String:
+            BulletText(cstring(raw_data(fmt.tprintf("%v: \"%v\"", label, value))))
+            return
+        }
+    }
 
-	// TODO: may be able to create a dynamic_float_cast proc similar to the integer equivalent
-	get_f32_value :: proc(value: any) -> (f32, bool) {
-		f32_value : f32
-		value_data, value_id := reflect.any_data(value)
-		if value_data == nil do return 0, false
-	  
-		ti := type_info_base(type_info_of(value_id))
-		tiv := ti.variant.(Type_Info_Float)
+    // generic case simply displays value with default formatting
+    BulletText(cstring(raw_data(fmt.tprintf("%v: %v", label, value))))
+    return
 
-		switch ti.size {
-			case 2: f32_value = auto_cast ((^f16)(value.data))^
-			case 4: f32_value = auto_cast ((^f32)(value.data))^
-			case 8: f32_value = auto_cast ((^f64)(value.data))^
-		}
+    // TODO: may be able to create a dynamic_float_cast proc similar to the integer equivalent
+    get_f32_value :: proc(value: any) -> (f32, bool) {
+        f32_value : f32
+        if value.data == nil do return 0, false
+      
+        ti := runtime.type_info_base(type_info_of(value.id))
+        ti_variant := ti.variant.(runtime.Type_Info_Float)
 
-		return f32_value, true
-	}
+        switch ti.size {
+            case 2: f32_value = auto_cast ((^f16)(value.data))^
+            case 4: f32_value = auto_cast ((^f32)(value.data))^
+            case 8: f32_value = auto_cast ((^f64)(value.data))^
+        }
 
-	set_f32_value :: proc(value: any, f32_value: f32) -> bool {
-		value_data, value_id := reflect.any_data(value)
-		if value_data == nil do return false
-		
-		ti := type_info_base(type_info_of(value_id))
-		tiv := ti.variant.(Type_Info_Float)
+        return f32_value, true
+    }
 
-		switch ti.size {
-			case 2: ((^f16)(value.data))^ = auto_cast f32_value
-			case 4: ((^f32)(value.data))^ = auto_cast f32_value
-			case 8: ((^f64)(value.data))^ = auto_cast f32_value
-		}
+    set_f32_value :: proc(value: any, f32_value: f32) -> bool {
+        if value.data == nil do return false
+        
+        ti := runtime.type_info_base(type_info_of(value.id))
+        ti_variant := ti.variant.(runtime.Type_Info_Float)
 
-		return true
-	}
+        switch ti.size {
+            case 2: ((^f16)(value.data))^ = auto_cast f32_value
+            case 4: ((^f32)(value.data))^ = auto_cast f32_value
+            case 8: ((^f64)(value.data))^ = auto_cast f32_value
+        }
+
+        return true
+    }
 }
 
 // BeginMaybe :: proc(enabled: bool, hide_disabled: bool) -> bool {
-// 	if Checkbox("##", &enabled) {
-// 		enabled = !enabled
-// 	}
+//     if Checkbox("##", &enabled) {
+//         enabled = !enabled
+//     }
 
-// 	if !enabled && hide_disabled {
-// 		return false
-// 	}
-	
-// 	BeginDisabled(!enabled)
-// 	return true
+//     if !enabled && hide_disabled {
+//         return false
+//     }
+    
+//     BeginDisabled(!enabled)
+//     return true
 // }
 
 // EndMaybe :: proc(disabled: bool) {
-// 	EndDisabled()
+//     EndDisabled()
 // }
-
-// also works for enum and boolean types, for the sake of convenience
-@(private)
-dynamic_int_cast :: proc(dst, src: any, enforce_size := false) -> bool {
-    using runtime
-  
-    ti_src := type_info_base(type_info_of(src.id))
-    ti_dst := type_info_base(type_info_of(dst.id))
-  
-    if enforce_size && ti_src.size > ti_dst.size {
-        return false
-    }
-  
-    // This is kind of an ugly solution
-    // But basically, just filter out all types which are not int, enum, or bool types
-    #partial switch tiv in ti_src.variant {
-        case Type_Info_Integer:
-        case Type_Info_Enum:
-        case Type_Info_Boolean:
-        case Type_Info_Bit_Set:
-        case: return false
-    }
-    #partial switch tiv in ti_dst.variant {
-        case Type_Info_Integer:
-        case Type_Info_Enum:
-        case Type_Info_Boolean:
-        case Type_Info_Bit_Set:
-        case: return false
-    }
-  
-    i64_value: i64
-  
-    switch ti_src.size {
-        case 1 : i64_value = auto_cast (cast(^i8  )src.data)^
-        case 2 : i64_value = auto_cast (cast(^i16 )src.data)^
-        case 4 : i64_value = auto_cast (cast(^i32 )src.data)^
-        case 8 : i64_value = auto_cast (cast(^i64 )src.data)^
-        case 16: i64_value = auto_cast (cast(^i128)src.data)^
-    }
-  
-    switch ti_dst.size {
-        case 1 : (cast(^i8  )dst.data)^ = auto_cast i64_value
-        case 2 : (cast(^i16 )dst.data)^ = auto_cast i64_value
-        case 4 : (cast(^i32 )dst.data)^ = auto_cast i64_value
-        case 8 : (cast(^i64 )dst.data)^ = auto_cast i64_value
-        case 16: (cast(^i128)dst.data)^ = auto_cast i64_value
-    }
-  
-    return true
-}
 
 @(private)
 dynamic_float_cast :: proc(dst, src: any, enforce_size := false) -> bool {
-    using runtime
-  
-    ti_src := type_info_base(type_info_of(src.id))
-    ti_dst := type_info_base(type_info_of(dst.id))
+    ti_src := runtime.type_info_base(type_info_of(src.id))
+    ti_dst := runtime.type_info_base(type_info_of(dst.id))
   
     if enforce_size && ti_src.size > ti_dst.size {
         return false
     }
   
-    _, allow_src := ti_src.variant.(Type_Info_Float)
-    _, allow_dst := ti_dst.variant.(Type_Info_Float)
+    _, allow_src := ti_src.variant.(runtime.Type_Info_Float)
+    _, allow_dst := ti_dst.variant.(runtime.Type_Info_Float)
     if !allow_src || !allow_dst {
         return false
     }
@@ -610,3 +482,44 @@ dynamic_float_cast :: proc(dst, src: any, enforce_size := false) -> bool {
     return true
 }
 
+// NOTE: We return -1 in the case that there is no valid mapping.
+DetermineDataType :: proc(type_info: ^runtime.Type_Info) -> DataType {
+    ti_base := runtime.type_info_base(type_info)
+    
+    #partial switch ti_variant in ti_base.variant {
+      case runtime.Type_Info_Integer:   
+        // TODO: Currently ignoring endianness. Not sure what to do about that for now. We would probably need to have handling in caller for this...
+        switch ti_base.size {
+          case 1: return .S8  if ti_variant.signed else .U8 
+          case 2: return .S16 if ti_variant.signed else .U16
+          case 4: return .S32 if ti_variant.signed else .U32
+          case 8: return .S64 if ti_variant.signed else .U64
+        }
+        
+      case runtime.Type_Info_Float:
+        switch ti_base.size {
+          case 4: return .Float
+          case 8: return .Double
+        }
+        
+      case runtime.Type_Info_Boolean:
+        return .Bool
+    }
+    
+    return cast(DataType) -1;
+}
+
+@(private)
+reverse_bytes_in_place :: proc(data: rawptr, len: int) {
+    start := cast(uintptr) data;
+    end   := start + cast(uintptr) len - 1
+    
+    for start <= end {
+        temp := (cast(^byte)start)^
+        (cast(^byte)start)^ = (cast(^byte)end)^
+        (cast(^byte)end)^ = temp
+        
+        start += 1
+        end   -= 1
+    }
+}
